@@ -49,7 +49,7 @@ def interpolateOut(line, t):
 
         direction = normalizeVec(lastPt - sndLastPt)
 
-        return lastPt + direction * (t - 1)
+        return lastPt + direction * (abs(t) - 1)
 
 
 def transformEach(transformation, mls):
@@ -155,48 +155,54 @@ def segmentMLS(mls, segments):
 
     for line in mls.geoms:
         lineList = list(line.coords)
+
         pointsPerSegment = len(lineList) // segments
-        newMLS.extend(
-            [
-                lineList[
-                    seg
-                    * pointsPerSegment : min(
-                        seg * pointsPerSegment + pointsPerSegment + 1, len(line.coords)
-                    )
-                ]
-                for seg in range(segments)
-            ]
-        )
 
-        if len(newMLS[-1]) < 2:
-            newMLS = merge_last_two(newMLS)
+        offset = randint(0, pointsPerSegment // 2)
 
+        if offset > 0:
+            newMLS.append(lineList[0 : offset + 1])
+
+        for seg in range(segments):
+            segStart = seg * pointsPerSegment + offset
+            newMLS.append(
+                lineList[segStart : min(segStart + pointsPerSegment + 1, len(lineList))]
+            )
+
+            # newMLS.append([lineList[0:5]])
+
+            if len(newMLS[-1]) < 2:
+                newMLS = merge_last_two(newMLS)
+
+    # print("lines = ", newMLS)
     return MultiLineString(newMLS)
 
 
-def generateSketchFramework(mls):
-    strokesList = [Mls(mls) for _ in range(1)]
-    for _ in range(2):
-        for i, strokes in enumerate(strokesList):
-            strokesList[i] = segmentMLS(strokesList[i], 2)
-            pass
-
-    return strokesList
-
-
-def cleanToSketch(strokesList, e=1):
-    strokesList = strokesList[:]
+def cleanToSketch(strokes, e=1):
+    strokesList = [Mls(strokes) for _ in range(3)]
     # todo use guassian noise
 
-    def rotateRand(stroke, range=20):
-        return shapely.affinity.rotate(
-            stroke, randFloat(-range / 2 * e, range / 2 * e), origin="center"
-        )
+    def rotateRand(range=20):
+        def rotateRandHelper(stroke):
+            return shapely.affinity.rotate(
+                stroke, randFloat(-range / 2 * e, range / 2 * e), origin="center"
+            )
 
-    for _ in range(3):
+        return rotateRandHelper
+
+    def splitAndRotate(rotation):
         for i, strokes in enumerate(strokesList):
-            strokesList[i] = transformEach(rotateRand, strokesList[i])
-            # strokesList[i] = extendLines(strokesList[i], 0.01 * e)
+            strokesList[i] = segmentMLS(strokesList[i], 2)
+            strokesList[i] = transformEach(rotateRand(rotation), strokesList[i])
+
+    splitAndRotate(10)
+    splitAndRotate(10)
+    splitAndRotate(40)
+
+    for i, strokes in enumerate(strokesList):
+        pass
+        # strokesList[i] = extendLines(strokesList[i], 0.01 * e)
+
     # union the strokesList
     unioned = strokesList[0]
     for i in range(1, len(strokesList)):
@@ -227,7 +233,7 @@ def JSONDecode(file_path, square=False):
     return strokes
 
 
-def previewImage(strokesList, showPoints=False, randColors=False, seed=10):
+def previewImage(strokes, showPoints=False, randColors=False, seed=10):
 
     BRUSH_SIZE = 2
     FIGSIZE = 5
@@ -248,15 +254,14 @@ def previewImage(strokesList, showPoints=False, randColors=False, seed=10):
 
         random.seed(seed)
         np.random.seed(seed)
-        global strokesList
 
         ax.clear()
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_aspect(1)
 
-        strokes = cleanToSketch(strokesList, e)
-        for stroke_i, stroke in enumerate(strokes.geoms):
+        newStrokes = cleanToSketch(strokes, e)
+        for stroke_i, stroke in enumerate(newStrokes.geoms):
             x, y = stroke.xy
             points = [[(x[j], y[j]), (x[j + 1], y[j + 1])] for j in range(len(x) - 1)]
 
@@ -284,7 +289,7 @@ strokes = JSONDecode(
     square=False,
 )
 
-strokesList = generateSketchFramework(strokes)
+# strokes = generateSketchFramework(strokes)
 # strokes = cleanToSketch(strokes)
 
-previewImage(strokesList=strokesList, showPoints=False, randColors=True)
+previewImage(strokes=strokes, showPoints=False, randColors=False)
