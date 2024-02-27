@@ -1,46 +1,35 @@
 import numpy as np
 
 
-def resample_list(data, target_length):
-    """
-    Resamples an ordered list to a different length using linear interpolation.
+class Segments:
+    # points can not be reassigned to other segments
+    def __init__(self, segments):
 
-    Args:
-      data: The input list.
-      target_length: The desired length of the resampled list.
+        # generate points by flattening the outermost dimention of segments
+        points = []
+        segMap = []
+        for i, seg in enumerate(segments):
+            for point in seg:
+                points.append(point)
+                segMap.append(i)
 
-    Returns:
-      A new list with the resampled elements.
-    """
+        self.points = np.array(points)
+        self._segMap = np.array(segMap)
 
-    if not data:
-        return []
+    def segCount(self):
+        return self._segMap[-1] + 1
 
-    # Calculate the spacing between samples based on the original data length.
-    step = (len(data) - 1) / (target_length - 1)
+    def to2DArr(self):
+        segments = [[] for _ in range(self.segCount())]
 
-    # Iterate through the list and interpolate values at each step.
-    resampled_data = []
-    for i in range(target_length):
-        index = i * step
-        # Check if the index is within the list range (handle edge cases).
-        if 0 <= index < len(data) - 1:
-            # Perform linear interpolation between the two elements.
-            weight1 = 1 - (index % 1)
-            weight2 = index % 1
-            value = data[int(index)] * weight1 + data[int(index + 1)] * weight2
-            resampled_data.append(value)
-        else:
-            # If the index is out of range, use the last or first element.
-            if index < 0:
-                resampled_data.append(data[0])
-            else:
-                resampled_data.append(data[-1])
+        for i, point in enumerate(self.points):
+            segments[self._segMap[i]].append(point)
 
-    return resampled_data
+        return segments
 
 
-# Example usage:
-data = [1, 2, 3, 4, 5]
-resampled_data = resample_list(data, 10)
-print(resampled_data)
+segments = [[(1, 2), (3, 4)], [(5, 6), (7, 8)], [(9, 10), (11, 12), (13, 14)]]
+segments = Segments(segments)
+print(segments.points)
+print(segments._segMap)
+print(segments.to2DArr())

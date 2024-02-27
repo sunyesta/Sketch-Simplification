@@ -11,6 +11,8 @@ import random
 from random import randint
 import math
 from statistics import mean
+from PIL import Image
+from pathlib import Path
 
 
 def resampleList(data, target_length):
@@ -360,21 +362,42 @@ def cleanToSketch(strokes, e=1, seed=1):
     return unioned
 
 
-strokes = JSONDecode(
-    f"/Users/mary/Documents/School/Sketch-Simplification/testStrokeData/monkey.json",
-    square=False,
+def pixelToStrokePointEncode(imgPath, imgPointsPath):
+
+    img = Image.open(imgPath, "r")
+    width, height = img.size
+
+    def getPointFromPixel(imgX, imgY):
+        return imgX / width, imgY / height
+
+    return
+
+
+imgPointsPath = Path(
+    f"/Users/mary/Documents/School/Sketch-Simplification/testStrokeData/monkey.json"
+)
+# imgPath =
+
+strokes = JSONDecode(imgPointsPath, square=False)
+strokesJSON = JSONEncode(
+    strokes,
+    Path(
+        f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/generatedJSON"
+    )
+    / "monkey.json",
 )
 
-print("starting: ", strokes.isValid())
+# print("starting: ", strokes.isValid())
 
-strokes = cleanToSketch(strokes)
+# strokes = cleanToSketch(strokes)
 
-print("after: ", strokes.isValid())
+# print("after: ", strokes.isValid())
 
+# pixelToStrokePointEncode(imgPath, i)
 
 # JSONEncode(
 #     strokes,
 #     f"/Users/mary/Documents/School/Sketch-Simplification/generatedJSON/test.json",
 # )
 
-previewImage(strokes=strokes, showPoints=False, randColors=False)
+# previewImage(strokes=strokes, showPoints=False, randColors=False)

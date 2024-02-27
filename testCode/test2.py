@@ -1,27 +1,21 @@
-def merge_last_two(data):
-    """Merges the last two sublists of a 2D list.
+from scipy.spatial import KDTree
 
-    Args:
-      data: A 2D list.
+# Define your list of points
+points = [(1, 2), (3, 4), (5, 6)]
 
-    Returns:
-      A new 2D list with the last two sublists merged.
-    """
+# Define the point you want to find the closest to (not in the list)
+query_point = (7, 8)
 
-    if len(data) < 2:
-        return data
+# Build a KDTree from the list of points
+tree = KDTree(points)
 
-    # Get the last two sublists.
-    last_two = data[-2:]
+# Find the index and distance to the closest point
+# distance, index = tree.query(query_point, k=1)  # k=1 for single nearest neighbor
+distances, indexes = tree.query(query_point, k=3)  # k=1 for single nearest neighbor
 
-    # Merge the last two sublists.
-    merged_list = last_two[0] + last_two[1]
+# Access the closest point from the list using the index
+closest_points = [points[i] for i in indexes]
+# closest_points = [points[i] for i in indexes]
 
-    # Combine the merged list with the remaining sublists.
-    return data[:-2] + [merged_list]
-
-
-# Example usage
-data = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
-merged_data = merge_last_two(data)
-print(merged_data)
+print(f"Closest point: {closest_points}")
+print(f"Distance to closest point: {distances}")
