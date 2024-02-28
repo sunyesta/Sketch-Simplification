@@ -20,7 +20,8 @@ def restartGP():
 
 
 def insertFrame(strokesPath, frame=None):
-    # MAKE SURE YOU CALL RESTART GP BEFORE FIRST CALL
+
+    # MAKE SURE YOU CALL restartGP() BEFORE FIRST CALL
     strokes = None
     with open(strokesPath, "r") as file:
         strokes = json.load(file)
@@ -42,7 +43,7 @@ def insertFrame(strokesPath, frame=None):
 
 
 path = Path(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/generatedJSON/gear.json"
+    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json"
 )
 
 

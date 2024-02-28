@@ -17,6 +17,11 @@ import sklearn
 from sklearn.preprocessing import normalize as normalizeVec
 from matplotlib.widgets import Slider
 from pathlib import Path
+from PIL import Image, ImageOps
+from scipy.spatial import KDTree
+
+
+# Classes
 
 
 class Segments:
@@ -37,7 +42,10 @@ class Segments:
     def segCount(self):
         return self._segMap[-1] + 1
 
-    def to2DArr(self):
+    def getSeg(self, point_i):
+        return self._segMap[point_i]
+
+    def toList(self):
         segments = [[] for _ in range(self.segCount())]
 
         for i, point in enumerate(self.points):
@@ -47,6 +55,22 @@ class Segments:
 
     def equivalent(self, other):
         return np.array.equal(self._segMap.other._segMap)
+
+
+class PixelEncoding:
+    def __init__(self, pt1_index, lerp, delta):
+        self.pt1_index = pt1_index  # first pt in line tbat is made up of 2 consecutive points (pt1,pt2) where pt2_index = pt1_index + 1
+        self.lerp = lerp  # distance along line
+        self.delta = delta  # distance from line
+
+
+# Other
+
+
+def generateSketch(segments, t, seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    return segments
 
 
 # --- Encodings --- #
@@ -117,131 +141,162 @@ def JSONDecode(file_path):
     with open(file_path, "r") as file:
         RAWStrokeInfo = json.load(file)
 
-    strokes = MultiLineString(RAWStrokeInfo["xy"])
+    strokes = MultiLineString(RAWStrokeInfo)
     strokes = normalizeMLS(strokes)
 
     strokes = transform(roundPoints, strokes)
     strokes = changeMLSResolution(strokes, 150)
     segments = Segments(multiLineStringToList(strokes))
-    # TODO convert to numpy
-
     return segments
 
 
-def JSONEncode(outfile, strokes):
+def JSONEncode(outfile, segments):
     with open(outfile, "wt") as file:
-        json.dump(multiLineStringToList(strokes), file)
+        json.dump(segments.toList(), file)
 
 
-def getPixelEncoding(img, strokes):
-    width, height = img.size()
+def getPixelEncoding(img, segments):
+    width, height = img.size
+    pixels = np.array(img)
+    spacialSegments = KDTree(segments.points)
 
     def pixelPoint(x, y):
-        return Point(x / width, y / height)
+        return (x / width, y / height)
 
-    def findClosestPoints(x, y):
-        # convert strokes into numpy of points
-        # get closest point
-        # remove that point from the point list
-        # get next closest point
-        # if both points are part of the same mls,then return the points
-        # else, remove the point and get the next closest point
+    def findClosestPair(point, maxPoints=10):
+        distances, indexes = spacialSegments.query(point, k=10)
+        for i, first_i in enumerate(indexes):
+            for j in range(i + 1, len(indexes)):
+                second_i = indexes[j]
+
+                # ensure that the points are on the same line and next to eachother
+                if (
+                    segments.getSeg(first_i) == segments.getSeg(second_i)
+                    and abs(first_i - second_i) == 1
+                ):
+                    # only need to return first point in the pair
+                    return min(first_i, second_i)
+
         return None
 
-    encoding = []
+    pixelEncodings = [[None for _ in range(width)] for _ in range(height)]
+    for y in range(height):
+        for x in range(width):
+
+            # if pixel value is white, don't encode it
+            v = pixels[x, y]
+            if v == 255:
+                continue
+
+            point = pixelPoint(x, y)
+            # get 2 closest points within the same segment
+            closest = findClosestPair(point)
+            if closest == None:
+                print("NONEEEE")
+            point = Point(point)
+            # get pixel's distance and lerp information
+            pt1, pt2 = segments.points[closest], segments.points[closest + 1]
+            line = LineString([pt1, pt2])
+
+            lerp = line.project(point, normalized=True)
+
+            # TODO  rename distance?s
+            # get point displacement from line
+            delta = line.distance(point)
+            slope = (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
+            ptAboveLine = (pt1[1] - point.y) > 0
+            if ptAboveLine and slope > 0:
+                delta *= -1
+
+            # store the data
+            pixelEncodings[x][y] = PixelEncoding(closest, lerp, delta)
 
     # for each black pixel:
     # flood search to find the corresponding points
     # calculate the encoding of the pixel given the points
 
-    return None
+    return np.array(pixelEncodings)
+
+
+def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
+    width, height = imgSize
+    img = Image.new("1", imgSize, 1)
+    pixels = img.load()
+
+    def getPointFromEncoding(pixe):
+        # print("index = ", pixe.pt1_index)
+        pt1, pt2 = segments.points[pixe.pt1_index], segments.points[pixe.pt1_index + 1]
+        line = LineString([pt1, pt2])
+        line_angle = math.atan2((pt2[1] - pt1[1]), (pt2[0] - pt1[0]))
+
+        pt = line.interpolate(pixe.lerp, normalized=True)
+
+        return np.array(
+            [
+                pt.x + pixe.delta * abs(math.cos(line_angle)),
+                pt.y + pixe.delta * math.sin(line_angle),
+            ]
+        )
+        # return segments.points[pixe.pt1_index]
+
+    for y in range(height):
+        for x in range(width):
+            pixe = pixelEncodings[x, y]
+            if pixe:
+                point = getPointFromEncoding(pixe)
+                pixel = np.array([point[0] * width, point[1] * height])
+                # print((x, y), (pixel[0], pixel[1]))
+                pixels[pixel[0], pixel[1]] = 0
+
+    img.show()
 
 
 # image rendering
 
 
-def saveImages(infile, outdir, steps=100, seed=1):
+def plotStrokes(ax, segments, t, seed, showPoints=False, randColors=False):
 
-    def plotStrokes(t, seed):
-        fig, ax = plt.subplots()
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect(1)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect(1)
 
-        random.seed(seed)
-        np.random.seed(seed)
+    ax.clear()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect(1)
 
-        ax.clear()
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect(1)
+    newSegments = generateSketch(segments, t, seed)
+    for seg_i, seg in enumerate(newSegments.toList()):
 
-        newStrokes = cleanToSketch(strokes, t)
-        for stroke_i, stroke in enumerate(newStrokes.geoms):
-            x, y = stroke.xy
-            points = [[(x[j], y[j]), (x[j + 1], y[j + 1])] for j in range(len(x) - 1)]
-            # ax.plot(points, color="black")
-            lc = LineCollection(points, color="black")
-            ax.add_collection(lc)
+        points = [
+            [(seg[i][0], seg[i][1]), (seg[i + 1][0], seg[i + 1][1])]
+            for i in range(len(seg) - 1)
+        ]
 
-        return plt
+        color = None
+        if randColors:
+            color = np.random.rand(3)
+        else:
+            color = "black"
 
-    strokes = JSONDecode(infile)
+        # ax.plot(points, color="black")
+        lc = LineCollection(points, color=color)
+        ax.add_collection(lc)
 
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    plt.axis(False)
-
-    for t in range(steps):
-        plot = plotStrokes(t / steps, 1)
-        plot.axis(False)
-        plot.savefig(outdir / Path(str(t) + ".png"))
+    if showPoints:
+        ax.scatter(
+            segments.points[:, 0], segments.points[:, 1], c="red", zorder=10, s=3
+        )
 
 
-def saveImagesAsOne(infile, outFile, steps=100, seed=1):
-    def plotStrokes(ax, t):
-
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect(1)
-
-        random.seed(seed)
-        np.random.seed(seed)
-
-        ax.clear()
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect(1)
-
-        newStrokes = cleanToSketch(strokes, t)
-        for stroke_i, stroke in enumerate(newStrokes.geoms):
-            x, y = stroke.xy
-            points = [[(x[j], y[j]), (x[j + 1], y[j + 1])] for j in range(len(x) - 1)]
-            # ax.plot(points, color="black")
-            lc = LineCollection(points, color="black")
-            ax.add_collection(lc)
-
-        return plt
-
-    strokes = JSONDecode(infile)
-
-    fig, axes = plt.subplots(1, steps)
-    for t in range(steps):
-        plot = plotStrokes(axes[t], t / steps)
-        axes[t].axis(False)
-        axes[t].margins(x=0)
-
-    plot.show()
-    # plot.savefig(outFile)
-
-
-def previewImage(strokes, showPoints=False, randColors=False, seed=10):
+def previewImage(segments, showPoints=False, randColors=False, seed=10):
 
     BRUSH_SIZE = 2
     FIGSIZE = 5
     plt.figure(figsize=(FIGSIZE, FIGSIZE))
     ax = plt.axes()
 
+    # configure plot
     fig, ax = plt.subplots()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -252,39 +307,9 @@ def previewImage(strokes, showPoints=False, randColors=False, seed=10):
     eInit = 0.5
     slider = Slider(ax=ax_slider, label="x", valmin=0, valmax=1, valinit=eInit)
 
-    minSize = 0.5
-
-    def taperFunc(x):
-        return -((2 * x - 1) ** 2) + 1 + minSize
-
-    # print(generateTaper(5, taperFunc))
-
-    def update(e):
-
-        random.seed(seed)
-        np.random.seed(seed)
-
+    def update(t):
         ax.clear()
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_aspect(1)
-
-        newStrokes = cleanToSketch(strokes, e)
-        for stroke_i, stroke in enumerate(newStrokes.geoms):
-            x, y = stroke.xy
-            points = [[(x[j], y[j]), (x[j + 1], y[j + 1])] for j in range(len(x) - 1)]
-            if randColors:
-                color = np.random.rand(3)
-            else:
-                color = "black"
-            # print("linewidths ", taper)
-            # plot lines
-            lc = LineCollection(points, color=color)
-            # lc.set_capstyle("round")
-            ax.add_collection(lc)
-
-            if showPoints:
-                ax.scatter(x, y, c="red", zorder=10, s=3)
+        plotStrokes(ax, segments, t, seed, showPoints=showPoints, randColors=randColors)
 
     update(eInit)
     slider.on_changed(update)
@@ -292,16 +317,21 @@ def previewImage(strokes, showPoints=False, randColors=False, seed=10):
     plt.show()
 
 
-strokes = JSONDecode(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/testStrokeData/gear.json",
-)
-
 generatedJSONDir = Path(
     "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/generatedJSON"
 )
-JSONEncode(generatedJSONDir / "gear.json", strokes)
 
-# strokes = generateSketchFramework(strokes)
-# strokes = cleanToSketch(strokes)
+segments = JSONDecode(
+    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
+)
 
-previewImage(strokes=strokes, showPoints=False, randColors=False)
+img = Image.open(
+    "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedRenders/monkey.png"
+)
+img = ImageOps.grayscale(img)
+
+# previewImage(segments=segments, showPoints=False, randColors=True)
+pixelEncoding = getPixelEncoding(img, segments)
+
+imgFromPixelEncoding(segments, pixelEncoding, img.size)
+# JSONEncode(generatedJSONDir / "gear.json", strokes)
