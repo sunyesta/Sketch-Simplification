@@ -19,7 +19,8 @@ from matplotlib.widgets import Slider
 from pathlib import Path
 from PIL import Image, ImageOps
 from scipy.spatial import KDTree
-
+import io
+import cairo
 
 # Classes
 
@@ -49,7 +50,7 @@ class Segments:
         segments = [[] for _ in range(self.segCount())]
 
         for i, point in enumerate(self.points):
-            segments[self._segMap[i]].append(point)
+            segments[self._segMap[i]].append((point[0], point[1]))
 
         return segments
 
@@ -72,7 +73,7 @@ def pixelToPoint(pixelXY, width, height):
 
 
 def pointToPixel(pointXY, width, height):
-    return (pointXY[0] * width, 1 - pointXY[1] * height)
+    return (int(pointXY[0] * width), int(height - pointXY[1] * height))
 
 
 def generateSketch(segments, t, seed):
@@ -97,7 +98,7 @@ def JSONDecode(file_path):
         def normalize(x, y):
             return (x - xmin) / (maxDim), (y - ymin) / (maxDim)
 
-        multiLineString = transform(normalize, multiLineString)
+        # multiLineString = transform(normalize, multiLineString)
 
         # center points around (0.5, 0.5)
         minx, miny, maxx, maxy = multiLineString.bounds
@@ -106,12 +107,12 @@ def JSONDecode(file_path):
         def center(x, y):
             return x - boundsCenter.x + 0.5, y - boundsCenter.y + 0.5
 
-        multiLineString = transform(center, multiLineString)
+        # multiLineString = transform(center, multiLineString)
 
         # scale image so that padding fits around it
-        multiLineString = shapely.affinity.scale(
-            multiLineString, 1 - padding, 1 - padding
-        )
+        # multiLineString = shapely.affinity.scale(
+        #     multiLineString, 1 - padding, 1 - padding
+        # )
 
         return multiLineString
 
@@ -149,16 +150,12 @@ def JSONDecode(file_path):
     with open(file_path, "r") as file:
         RAWStrokeInfo = json.load(file)
 
-    strokes = MultiLineString(RAWStrokeInfo)
-    strokes = normalizeMLS(strokes)
-
-    strokes = transform(roundPoints, strokes)
-    strokes = changeMLSResolution(strokes, 150)
-    segments = Segments(multiLineStringToList(strokes))
+    segments = Segments(RAWStrokeInfo)
     return segments
 
 
 def JSONEncode(outfile, segments):
+    print(segments.toList()[0])
     with open(outfile, "wt") as file:
         json.dump(segments.toList(), file)
 
@@ -235,12 +232,12 @@ def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
 
         pt = line.interpolate(pixe.lerp, normalized=True)
 
-        # return np.array(
-        #     [
-        #         pt.x + pixe.delta * abs(math.cos(line_angle)),
-        #         pt.y + pixe.delta * math.sin(line_angle),
-        #     ]
-        # )
+        return np.array(
+            [
+                pt.x + pixe.delta * math.cos(line_angle),
+                pt.y + pixe.delta * math.sin(line_angle),
+            ]
+        )
         return segments.points[pixe.pt1_index]
 
     for y in range(height):
@@ -249,7 +246,7 @@ def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
             if pixe:
                 point = getPointFromEncoding(pixe)
                 pixel = pointToPixel(point, width, height)
-                # print((x, y), (pixel[0], pixel[1]))
+                print((x, y), (pixel[0], pixel[1]))
                 pixels[pixel[0], pixel[1]] = 0
 
     return img
@@ -306,7 +303,7 @@ def plotStrokes(ax, segments, t, seed, showPoints=False, randColors=False):
         )
 
 
-def previewImage(segments, showPoints=False, randColors=False, seed=10):
+def interactivePreview(segments, showPoints=False, randColors=False, seed=10):
 
     BRUSH_SIZE = 2
     FIGSIZE = 5
@@ -332,24 +329,115 @@ def previewImage(segments, showPoints=False, randColors=False, seed=10):
     plt.show()
 
 
+def renderStrokes(
+    segments, showPoints=False, randColors=False, seed=10, size=(1000, 1000)
+):
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    plotStrokes(
+        ax, segments, t=0, seed=seed, showPoints=showPoints, randColors=randColors
+    )
+
+    plt.axis(False)
+
+    buffer = io.BytesIO()
+    plt.savefig(
+        buffer,
+        bbox_inches="tight",
+    )
+    buffer.seek(0)  # Rewind the buffer
+    img = Image.open(buffer)
+    img.resize(size)
+    return img
+
+
+def renderStrokesCario(segments, size):
+
+    tempSize = 5000
+    width, height = tempSize, tempSize
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    ctx = cairo.Context(surface)
+
+    # White background
+    ctx.set_source_rgb(1, 1, 1)
+    ctx.rectangle(0, 0, width, height)
+    ctx.fill()
+
+    # black pen
+    ctx.set_source_rgb(0, 0, 0)
+    ctx.set_line_width(5)
+
+    ctx.move_to(50, 50)
+    ctx.line_to(350, 250)
+    ctx.stroke()
+
+    for seg_i, seg in enumerate(segments.toList()):
+        pixels = [pointToPixel(point, tempSize, tempSize) for point in seg]
+        # points = [
+        #     [(seg[i][0], seg[i][1]), (seg[i + 1][0], seg[i + 1][1])]
+        #     for i in range(len(seg) - 1)
+        # ]
+
+        # print("points", pixels[0])
+        ctx.move_to(pixels[0][0], pixels[0][1])
+
+        for pixel in pixels:
+            ctx.line_to(pixel[0], pixel[1])
+
+        ctx.stroke()
+
+    data = surface.get_data()
+    img = Image.frombytes("RGBA", (width, height), data)
+    img = img.resize((size, size))
+    # Save the image as "pycario.png"
+    # img.save("pycario.png")
+
+    return img
+
+
+def segmentsOnImage(img, segments):
+    width, height = img.size
+    img = img.copy()
+    img = img.convert("RGB")
+
+    pixels = img.load()
+
+    for point in segments.points:
+        pixel = pointToPixel(point, width, height)
+        pixels[pixel[0], pixel[1]] = (255, 0, 0)
+
+    return img
+
+
 generatedJSONDir = Path(
-    "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/generatedJSON"
+    "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/codeGeneratedJSON"
 )
+
+# JSONEncode(generatedJSONDir / "monkey.json", segments)
+
+# img = Image.open(
+#     "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedRenders/monkey.png"
+# )
+# img = ImageOps.grayscale(img)
+
 
 segments = JSONDecode(
     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
 )
 
-img = Image.open(
-    "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedRenders/monkey.png"
-)
-img = ImageOps.grayscale(img)
 
-# previewImage(segments=segments, showPoints=False, randColors=True)
-pixelEncoding = getPixelEncoding(img, segments)
+renderedStrokesImg = renderStrokesCario(segments=segments, size=300)
+print("final size = ", renderedStrokesImg.size)
+# renderedStrokesImg.show()
 
-img2 = imgFromPixelEncoding(segments, pixelEncoding, img.size)
+pixelEncoding = getPixelEncoding(renderedStrokesImg, segments)
+encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)
 
-displayOverlayImages(img, img2)
+
+displayOverlayImages(renderedStrokesImg, encodedImage)
 
 # JSONEncode(generatedJSONDir / "gear.json", strokes)
+
+# segmentsOnImage(img, segments).show()

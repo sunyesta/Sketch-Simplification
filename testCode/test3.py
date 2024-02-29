@@ -1,35 +1,30 @@
-import numpy as np
+import cairo
+from PIL import Image
 
+# Define image dimensions
+width, height = 400, 400
 
-class Segments:
-    # points can not be reassigned to other segments
-    def __init__(self, segments):
+# Create a Cairo surface with a white background
+surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+ctx = cairo.Context(surface)
+ctx.set_source_rgb(1, 1, 1)  # White background
+ctx.rectangle(0, 0, width, height)
+ctx.fill()
 
-        # generate points by flattening the outermost dimention of segments
-        points = []
-        segMap = []
-        for i, seg in enumerate(segments):
-            for point in seg:
-                points.append(point)
-                segMap.append(i)
+# Set drawing parameters for the line
+ctx.set_source_rgb(0, 0, 0)  # Black line color
+ctx.set_line_width(5)
 
-        self.points = np.array(points)
-        self._segMap = np.array(segMap)
+# Draw the line
+ctx.move_to(50, 50)
+ctx.line_to(350, 250)
+ctx.stroke()
 
-    def segCount(self):
-        return self._segMap[-1] + 1
+# Convert Cairo surface to PIL image
+data = surface.get_data()
+img = Image.frombytes("RGBA", (width, height), data)
 
-    def to2DArr(self):
-        segments = [[] for _ in range(self.segCount())]
+# Save the image as "pycario.png"
+img.save("pycario.png")
 
-        for i, point in enumerate(self.points):
-            segments[self._segMap[i]].append(point)
-
-        return segments
-
-
-segments = [[(1, 2), (3, 4)], [(5, 6), (7, 8)], [(9, 10), (11, 12), (13, 14)]]
-segments = Segments(segments)
-print(segments.points)
-print(segments._segMap)
-print(segments.to2DArr())
+print("Image saved as pycario.png")
