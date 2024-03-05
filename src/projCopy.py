@@ -22,6 +22,14 @@ from scipy.spatial import KDTree
 import io
 import cairo
 
+
+# helpers
+
+
+def randFloat(lower_bound, upper_bound):
+    return random.random() * (upper_bound - lower_bound) + lower_bound
+
+
 # Classes
 
 
@@ -53,6 +61,7 @@ class Segments:
         for i, point in enumerate(self.points):
             segments[self.segMap[i]].append((point[0], point[1]))
 
+        segments = [np.array(seg) for seg in segments]
         return segments
 
     def equivalent(self, other):
@@ -71,41 +80,17 @@ class Segments:
         def newDashLength():
             return orignalDashLength + random.randint(-dashLengthRange, dashLengthRange)
 
-        self = self.copy()
-        segMap = self.segMap
-        # unlock the segMap
-        self.segMap.flags.writeable = True
+        segs = self.toList()
+        newSegs = []
 
-        nextSeg = self.segCount()
+        for seg in segs:
+            start = 1
+            while start < len(seg) - 1:
+                end = min(len(seg) - 1, start + newDashLength())
+                newSegs.append(seg[start - 1 : end + 1])
+                start = end
 
-        dashLength = newDashLength()
-        runLength = 1  # since we start at 1, that means our runlength is already 1
-        for i in range(1, len(segMap)):
-
-            # if we reach a new seg, reset the runLength
-            if segMap[i] != segMap[i - 1]:
-                runLength = 0
-
-            runLength += 1
-
-            # once we hit the dashLength, cut the segment
-            if runLength > dashLength:
-                runLength = 1  # since we are reseting the current val, we need to change the run length
-                orgSeg = segMap[i]
-                for j in range(i, len(segMap)):
-                    # when we reach the end of the origional segment, stop changing the segment values
-                    if segMap[j] != orgSeg:
-                        break
-
-                    segMap[j] = nextSeg
-
-                nextSeg += 1
-                dashLength = newDashLength()
-
-        # relock the segMap
-        self.segMap.flags.writeable = False
-
-        return self
+        return Segments(newSegs)
 
 
 class PixelEncoding:
@@ -113,6 +98,20 @@ class PixelEncoding:
         self.pt1_index = pt1_index  # first pt in line tbat is made up of 2 consecutive points (pt1,pt2) where pt2_index = pt1_index + 1
         self.lerp = lerp  # distance along line
         self.delta = delta  # distance from line
+
+    def toPoint(self, segments):
+        pt1, pt2 = segments.points[self.pt1_index], segments.points[self.pt1_index + 1]
+        line = LineString([pt1, pt2])
+        line_angle = math.atan2((pt2[1] - pt1[1]), (pt2[0] - pt1[0]))
+
+        pt = line.interpolate(self.lerp, normalized=True)
+
+        return np.array(
+            [
+                pt.x + self.delta * math.cos(line_angle + math.radians(90)),
+                pt.y + self.delta * math.sin(line_angle + math.radians(90)),
+            ]
+        )
 
 
 # Other
@@ -130,9 +129,78 @@ def generateSketch(segments, t, seed):
     random.seed(seed)
     np.random.seed(seed)
 
-    for cut in range(1):
-        segments = segments.dash(5, 5)
-    return segments
+    def dash(segList, dashLength, dashLengthRange=0):
+        assert dashLength > 0, "dashLength must be > 0"
+
+        dashLengthRange = dashLengthRange // 2
+
+        orignalDashLength = dashLength
+
+        def newDashLength():
+            return orignalDashLength + random.randint(-dashLengthRange, dashLengthRange)
+
+        newSegs = []
+
+        for seg in segList:
+            start = 1
+            while start < len(seg) - 1:
+                end = min(len(seg) - 1, start + newDashLength())
+                newSegs.append(seg[start - 1 : end + 1])
+                start = end
+
+        return [np.array(seg) for seg in newSegs]
+
+    def rotate_array(points, angle):
+        """
+        Rotates a numpy array of coordinate pairs around its center.
+
+        Args:
+            points: A numpy array of shape (n, 2) where each row represents a coordinate pair.
+            angle: The angle of rotation in degrees.
+
+        Returns:
+            A numpy array of the rotated points.
+        """
+        # Convert angle to radians
+        angle_rad = np.radians(angle)
+
+        # Get the center of the points
+        center = np.mean(points, axis=0)
+
+        # Shift the points to be centered around the origin
+        shifted_points = points - center
+
+        # Create the rotation matrix
+        rotation_matrix = np.array(
+            [
+                [np.cos(angle_rad), -np.sin(angle_rad)],
+                [np.sin(angle_rad), np.cos(angle_rad)],
+            ]
+        )
+
+        # Rotate the points
+        rotated_points = np.dot(shifted_points, rotation_matrix)
+
+        # Shift the points back to their original position
+        rotated_points += center
+
+        return rotated_points
+
+    def cutAndRotate(segList, cutLen, angleRange):
+        angleRange = angleRange / 2
+        segList = dash(segList, cutLen, 5)
+        for i, seg in enumerate(segList):
+            segList[i] = rotate_array(seg, randFloat(-angleRange, angleRange))
+
+        return segList
+
+    segList = segments.toList()
+
+    segList = cutAndRotate(segList, 30, 20 * t)
+    segList = cutAndRotate(segList, 20, 10 * t)
+    segList = cutAndRotate(segList, 10, 5 * t)
+
+    return Segments(segList)
 
 
 # --- Encodings --- #
@@ -215,7 +283,7 @@ def JSONEncode(outfile, segments):
         json.dump(segments.toList(), file)
 
 
-def getPixelEncoding(img, segments):
+def getPixelEncodings(img, segments):
     width, height = img.size
     pixels = img.load()
     spacialSegments = KDTree(segments.points)
@@ -282,27 +350,11 @@ def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
     img = Image.new("1", imgSize, 1)
     pixels = img.load()
 
-    def getPointFromEncoding(pixe):
-        pt1, pt2 = segments.points[pixe.pt1_index], segments.points[pixe.pt1_index + 1]
-        line = LineString([pt1, pt2])
-        line_angle = math.atan2((pt2[1] - pt1[1]), (pt2[0] - pt1[0]))
-
-        pt = line.interpolate(pixe.lerp, normalized=True)
-
-        # return (pt.x, pt.y)
-        # return segments.points[pixe.pt1_index]
-        return np.array(
-            [
-                pt.x + pixe.delta * math.cos(line_angle + math.radians(90)),
-                pt.y + pixe.delta * math.sin(line_angle + math.radians(90)),
-            ]
-        )
-
     for y in range(height):
         for x in range(width):
             pixe = pixelEncodings[x, y]
             if pixe:
-                point = getPointFromEncoding(pixe)
+                point = pixe.toPoint(segments)
                 pixel = pointToPixel(point, width, height)
                 # print((x, y), (pixel[0], pixel[1]))
                 pixels[pixel[0], pixel[1]] = 0
@@ -469,6 +521,47 @@ def segmentsOnImage(img, segments):
     return img
 
 
+def generateOffsets(pixelEncodings, segs1, segs2):
+
+    width, height = pixelEncodings.shape
+
+    offsets = np.zeros([height, width, 2])
+
+    for r, row in enumerate(pixelEncodings):
+        for c, pixe in enumerate(row):
+            if pixe:
+                offsets[r, c] = pixe.toPoint(segs2) - pixe.toPoint(segs1)
+
+    return offsets
+
+
+def viewOffsets(pixelEncodings,offsets):
+    # configure plot
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect(1)
+
+    # add slider
+    ax_slider = fig.add_axes([0.2, 0.0, 0.65, 0.03])
+    eInit = 0.5
+    slider = Slider(ax=ax_slider, label="x", valmin=0, valmax=1, valinit=eInit)
+
+    # TODO need to collapse pixelEncodings outer dimention first
+    origionalPoints = [pixe.toPoint() for pixe in pixelEncodings]
+    
+    def update(t):
+        ax.clear()
+        for row in offsets:
+            for offset in row:
+                
+
+    update(eInit)
+    slider.on_changed(update)
+
+    plt.show()
+
+
 generatedJSONDir = Path(
     "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/codeGeneratedJSON"
 )
@@ -486,13 +579,19 @@ segments = JSONDecode(
 )
 
 
-segmentsBaked = generateSketch(segments, t=0, seed=1)
+segmentsBaked0 = generateSketch(segments, t=0, seed=1)
+segmentsBaked1 = generateSketch(segments, t=1, seed=1)
 
-interactivePreview(segmentsBaked, randColors=True)
-# renderedStrokesImg = renderStrokesCario(segments=segmentsBaked, size=1000)
+
+segmentsBaked1Img = renderStrokesCario(segments=segmentsBaked1, size=300)
+pixelEncodings = getPixelEncodings(segmentsBaked1Img, segments)
+
+print(generateOffsets(pixelEncodings, segmentsBaked0, segmentsBaked1))
+
+# interactivePreview(segments, randColors=True)
+
 # renderedStrokesImg.show()
 
-# pixelEncoding = getPixelEncoding(renderedStrokesImg, segments)
 # encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)
 
 
