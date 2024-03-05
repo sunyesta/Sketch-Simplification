@@ -38,27 +38,74 @@ class Segments:
                 segMap.append(i)
 
         self.points = np.array(points)
-        self._segMap = np.array(segMap)
+        self.segMap = np.array(segMap)
+        self.segMap.flags.writeable = False
 
     def segCount(self):
-        return self._segMap[-1] + 1
+        return max(self.segMap) + 1
 
     def getSeg(self, point_i):
-        return self._segMap[point_i]
+        return self.segMap[point_i]
 
     def toList(self):
         segments = [[] for _ in range(self.segCount())]
 
         for i, point in enumerate(self.points):
-            segments[self._segMap[i]].append((point[0], point[1]))
+            segments[self.segMap[i]].append((point[0], point[1]))
 
         return segments
 
     def equivalent(self, other):
-        return np.array.equal(self._segMap.other._segMap)
+        return np.array.equal(self.segMap.other.segMap)
 
     def copy(self):
         return Segments(self.toList())
+
+    def dash(self, dashLength, dashLengthRange=0):
+        assert dashLength > 0, "dashLength must be > 0"
+
+        dashLengthRange = dashLengthRange // 2
+
+        orignalDashLength = dashLength
+
+        def newDashLength():
+            return orignalDashLength + random.randint(-dashLengthRange, dashLengthRange)
+
+        self = self.copy()
+        segMap = self.segMap
+        # unlock the segMap
+        self.segMap.flags.writeable = True
+
+        nextSeg = self.segCount()
+
+        dashLength = newDashLength()
+        runLength = 1  # since we start at 1, that means our runlength is already 1
+        for i in range(1, len(segMap)):
+
+            # if we reach a new seg, reset the runLength
+            if segMap[i] != segMap[i - 1]:
+                runLength = 0
+
+            runLength += 1
+
+            # once we hit the dashLength, cut the segment
+            if runLength > dashLength:
+                runLength = 1  # since we are reseting the current val, we need to change the run length
+                orgSeg = segMap[i]
+                for j in range(i, len(segMap)):
+                    # when we reach the end of the origional segment, stop changing the segment values
+                    if segMap[j] != orgSeg:
+                        break
+
+                    segMap[j] = nextSeg
+
+                nextSeg += 1
+                dashLength = newDashLength()
+
+        # relock the segMap
+        self.segMap.flags.writeable = False
+
+        return self
 
 
 class PixelEncoding:
@@ -82,35 +129,9 @@ def pointToPixel(pointXY, width, height):
 def generateSketch(segments, t, seed):
     random.seed(seed)
     np.random.seed(seed)
-    segments = segments.copy()
 
-    def rotateAroundCenter(coords, angle):
-
-        # Convert angle to radians
-        theta = np.radians(angle)
-
-        # Find the center of the array
-        center = np.mean(coords, axis=0)
-
-        # Shift coordinates relative to center
-        shifted_coords = coords - center
-
-        # Create a rotation matrix
-        rotation_matrix = np.array(
-            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
-        )
-
-        # Apply the rotation matrix to the shifted coordinates
-        rotated_coords = shifted_coords.dot(rotation_matrix)
-
-        # Shift coordinates back to original position relative to center
-        return rotated_coords + center
-
-    # print(segments.points)
-    segments.points = rotateAroundCenter(segments.points, 90)
-    # print(segments.points)
-    # segments.points = segments.points / 3
-
+    for cut in range(1):
+        segments = segments.dash(5, 5)
     return segments
 
 
@@ -464,10 +485,12 @@ segments = JSONDecode(
     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
 )
 
+
 segmentsBaked = generateSketch(segments, t=0, seed=1)
 
-renderedStrokesImg = renderStrokesCario(segments=segmentsBaked, size=1000)
-renderedStrokesImg.show()
+interactivePreview(segmentsBaked, randColors=True)
+# renderedStrokesImg = renderStrokesCario(segments=segmentsBaked, size=1000)
+# renderedStrokesImg.show()
 
 # pixelEncoding = getPixelEncoding(renderedStrokesImg, segments)
 # encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)

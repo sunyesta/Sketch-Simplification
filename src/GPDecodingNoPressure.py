@@ -37,24 +37,59 @@ class Segments:
                 segMap.append(i)
 
         self.points = np.array(points)
-        self._segMap = np.array(segMap)
+        self.segMap = np.array(segMap)
+
+        # lock the segMap
+        self.segMap.flags.writeable = False
 
     def segCount(self):
-        return self._segMap[-1] + 1
+        return self.segMap[-1] + 1
 
     def getSeg(self, point_i):
-        return self._segMap[point_i]
+        return self.segMap[point_i]
 
     def toList(self):
         segments = [[] for _ in range(self.segCount())]
 
         for i, point in enumerate(self.points):
-            segments[self._segMap[i]].append(point)
+            segments[self.segMap[i]].append(point)
 
         return segments
 
     def equivalent(self, other):
-        return np.array.equal(self._segMap.other._segMap)
+        return np.array.equal(self.segMap.other.segMap)
+
+    def dash(self, dashLength, gap):
+        assert dashLength > 0, "dashLength must be > 0"
+
+        # unlock the segMap
+        self.segMap.flags.writeable = True
+
+        nextSeg = self.segCount()
+
+        last_seg = -1
+        runLength = 0
+        for i, seg in enumerate(self.segMap):
+            # if we reach a new seg, reset the runLength
+            if seg != last_seg:
+                last_seg = seg
+                runLength = 0
+
+            runLength += 1
+
+            # if the runLength is too high,
+            if runLength > dashLength:
+                runLength = 0
+                for j, seg2 in enumerate(self.segMap, start=i):
+                    # when we reach the end of the segment, stop changing the segment values
+                    if seg2 != last_seg:
+                        break
+                    self.segMap[j] = nextSeg
+
+                nextSeg += 1
+
+        # relock the segMap
+        self.segMap.flags.writeable = False
 
 
 class PixelEncoding:
@@ -78,6 +113,10 @@ def pointToPixel(pointXY, width, height):
 def generateSketch(segments, t, seed):
     random.seed(seed)
     np.random.seed(seed)
+
+    for cut in range(3):
+        segments.cut()
+
     return segments
 
 
