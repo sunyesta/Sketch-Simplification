@@ -57,6 +57,9 @@ class Segments:
     def equivalent(self, other):
         return np.array.equal(self._segMap.other._segMap)
 
+    def copy(self):
+        return Segments(self.toList())
+
 
 class PixelEncoding:
     def __init__(self, pt1_index, lerp, delta):
@@ -73,12 +76,41 @@ def pixelToPoint(pixelXY, width, height):
 
 
 def pointToPixel(pointXY, width, height):
-    return (int(pointXY[0] * width), int(height - pointXY[1] * height))
+    return (round(pointXY[0] * width), round(height - pointXY[1] * height))
 
 
 def generateSketch(segments, t, seed):
     random.seed(seed)
     np.random.seed(seed)
+    segments = segments.copy()
+
+    def rotateAroundCenter(coords, angle):
+
+        # Convert angle to radians
+        theta = np.radians(angle)
+
+        # Find the center of the array
+        center = np.mean(coords, axis=0)
+
+        # Shift coordinates relative to center
+        shifted_coords = coords - center
+
+        # Create a rotation matrix
+        rotation_matrix = np.array(
+            [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+        )
+
+        # Apply the rotation matrix to the shifted coordinates
+        rotated_coords = shifted_coords.dot(rotation_matrix)
+
+        # Shift coordinates back to original position relative to center
+        return rotated_coords + center
+
+    # print(segments.points)
+    segments.points = rotateAroundCenter(segments.points, 90)
+    # print(segments.points)
+    # segments.points = segments.points / 3
+
     return segments
 
 
@@ -150,6 +182,8 @@ def JSONDecode(file_path):
     with open(file_path, "r") as file:
         RAWStrokeInfo = json.load(file)
 
+    # segments = MultiLineString(RAWStrokeInfo)
+    # segments = changeMLSResolution(segments, 100)
     segments = Segments(RAWStrokeInfo)
     return segments
 
@@ -187,7 +221,9 @@ def getPixelEncoding(img, segments):
 
             # if pixel value is white, don't encode it
             v = pixels[x, y]
-            if v == 255:
+            # print(v)
+            if v == (255, 255, 255, 255):
+                # print("skipped")
                 continue
 
             point = pixelToPoint((x, y), width, height)
@@ -202,12 +238,12 @@ def getPixelEncoding(img, segments):
             line = LineString([pt1, pt2])
 
             lerp = line.project(point, normalized=True)
-
+            pointOnLine = line.interpolate(lerp, normalized=True)
             # get point displacement from line
             delta = line.distance(point)
-            slope = (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
-            ptAboveLine = (pt1[1] - point.y) > 0
-            if ptAboveLine and slope > 0:
+            # slope = (pt2[1] - pt1[1]) / (pt2[0] - pt1[0])
+            ptAboveLine = (pointOnLine.y - point.y) > 0
+            if ptAboveLine:
                 delta *= -1
 
             # store the data
@@ -232,13 +268,14 @@ def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
 
         pt = line.interpolate(pixe.lerp, normalized=True)
 
+        # return (pt.x, pt.y)
+        # return segments.points[pixe.pt1_index]
         return np.array(
             [
-                pt.x + pixe.delta * math.cos(line_angle),
-                pt.y + pixe.delta * math.sin(line_angle),
+                pt.x + pixe.delta * math.cos(line_angle + math.radians(90)),
+                pt.y + pixe.delta * math.sin(line_angle + math.radians(90)),
             ]
         )
-        return segments.points[pixe.pt1_index]
 
     for y in range(height):
         for x in range(width):
@@ -246,7 +283,7 @@ def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
             if pixe:
                 point = getPointFromEncoding(pixe)
                 pixel = pointToPixel(point, width, height)
-                print((x, y), (pixel[0], pixel[1]))
+                # print((x, y), (pixel[0], pixel[1]))
                 pixels[pixel[0], pixel[1]] = 0
 
     return img
@@ -367,11 +404,7 @@ def renderStrokesCario(segments, size):
 
     # black pen
     ctx.set_source_rgb(0, 0, 0)
-    ctx.set_line_width(5)
-
-    ctx.move_to(50, 50)
-    ctx.line_to(350, 250)
-    ctx.stroke()
+    ctx.set_line_width(1)
 
     for seg_i, seg in enumerate(segments.toList()):
         pixels = [pointToPixel(point, tempSize, tempSize) for point in seg]
@@ -395,6 +428,10 @@ def renderStrokesCario(segments, size):
     # img.save("pycario.png")
 
     return img
+
+
+def renderStrokesMine(segments, size):
+    pass
 
 
 def segmentsOnImage(img, segments):
@@ -427,16 +464,16 @@ segments = JSONDecode(
     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
 )
 
+segmentsBaked = generateSketch(segments, t=0, seed=1)
 
-renderedStrokesImg = renderStrokesCario(segments=segments, size=300)
-print("final size = ", renderedStrokesImg.size)
-# renderedStrokesImg.show()
+renderedStrokesImg = renderStrokesCario(segments=segmentsBaked, size=1000)
+renderedStrokesImg.show()
 
-pixelEncoding = getPixelEncoding(renderedStrokesImg, segments)
-encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)
+# pixelEncoding = getPixelEncoding(renderedStrokesImg, segments)
+# encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)
 
 
-displayOverlayImages(renderedStrokesImg, encodedImage)
+# displayOverlayImages(renderedStrokesImg, encodedImage)
 
 # JSONEncode(generatedJSONDir / "gear.json", strokes)
 
