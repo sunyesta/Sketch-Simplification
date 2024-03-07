@@ -114,6 +114,37 @@ class PixelEncoding:
         )
 
 
+class PixelEncodingSet:
+    def __init__(self, pixelEncodings, imgShape):
+        # pixelEncodings = list of pixelEncodings
+        # img shape = (width, height)
+        assert (
+            len(pixelEncodings) == imgShape[1] * imgShape[0]
+        ), f"shape must be {imgShape[0]*imgShape[1]} but is {len(pixelEncodings)}"
+
+        self.shape = imgShape
+        self.items = pixelEncodings
+
+    def toMatrix(self):
+        return self.items.reshape(self.imgShape)
+
+    def getXY(self, x, y):
+        # print("shape = ", self.shape)
+        # print("index = ", y * self.shape[1] + x, " for ", x, y)
+        return self.items[y * self.shape[1] + x]
+
+    def getPoints(self, segments):
+        points = np.zeros((self.shape[0] * self.shape[1], 2))
+
+        for i, pixe in enumerate(self.items):
+            if pixe:
+                point = pixe.toPoint(segments)
+                # print(point)
+                points[i][0] = point[0]
+                points[i][1] = point[1]
+        return points
+
+
 # Other
 
 
@@ -304,7 +335,9 @@ def getPixelEncodings(img, segments):
 
         return None
 
-    pixelEncodings = [[None for _ in range(width)] for _ in range(height)]
+    print("before height and width = ", (width, height))
+    pixelEncodings = [None for _ in range(height * width)]
+
     for y in range(height):
         for x in range(width):
 
@@ -336,23 +369,25 @@ def getPixelEncodings(img, segments):
                 delta *= -1
 
             # store the data
-            pixelEncodings[x][y] = PixelEncoding(closest, lerp, delta)
+            pixelEncodings[y * height + x] = PixelEncoding(closest, lerp, delta)
 
+    # print(counter, "after = ", len(pixelEncodings))
     # for each black pixel:
     # flood search to find the corresponding points
     # calculate the encoding of the pixel given the points
+    pixeSet = PixelEncodingSet(pixelEncodings, img.size)
+    print("set shape = ", pixeSet.shape)
+    return pixeSet
 
-    return np.array(pixelEncodings)
 
-
-def imgFromPixelEncoding(segments, pixelEncodings, imgSize):
-    width, height = imgSize
-    img = Image.new("1", imgSize, 1)
+def imgFromPixelEncoding(segments, pixelEncodingSet):
+    width, height = pixelEncodingSet.shape
+    img = Image.new("1", (width, height), 1)
     pixels = img.load()
 
     for y in range(height):
         for x in range(width):
-            pixe = pixelEncodings[x, y]
+            pixe = pixelEncodingSet.get(x, y)
             if pixe:
                 point = pixe.toPoint(segments)
                 pixel = pointToPixel(point, width, height)
@@ -527,15 +562,49 @@ def generateOffsets(pixelEncodings, segs1, segs2):
 
     offsets = np.zeros([height, width, 2])
 
-    for r, row in enumerate(pixelEncodings):
-        for c, pixe in enumerate(row):
+    for x in range(width):
+        for y in range(height):
+
+            pixe = pixelEncodings.getXY(x, y)
+            # print(pixe)
             if pixe:
-                offsets[r, c] = pixe.toPoint(segs2) - pixe.toPoint(segs1)
+                offsets[y, x] = pixe.toPoint(segs2) - pixe.toPoint(segs1)
 
     return offsets
 
 
-def viewOffsets(pixelEncodings,offsets):
+def generateSteppedOffsets(jsonPath, size=300, steps=10, seed=1):
+
+    # get the segments from the json file
+    segs = JSONDecode(
+        f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
+    )
+
+    # turn the segments into a non-sketchy sketch, timestep = 0
+    segsBaked0 = generateSketch(segs, t=0, seed=seed)
+
+    # generate a clean image from the segments
+    orgImg = renderStrokesCario(segments=segsBaked0, size=size)
+
+    # generate the pixel encodings from the clean image and the original segments
+    pixelEncodings = getPixelEncodings(orgImg, segsBaked0)
+
+    segsBakedLast = segsBaked0
+    steppedOffsets = []
+    for step in range(1, steps):
+        segsBakedStep = generateSketch(segs, t=step / steps, seed=seed)
+        steppedOffsets.append(
+            generateOffsets(pixelEncodings, segsBakedLast, segsBakedStep)
+        )
+        segsBakedLast = segsBakedStep
+
+    print("points shape = ", segsBaked0.points.shape)
+    return pixelEncodings.getPoints(segsBaked0), steppedOffsets
+
+
+def viewOffsets(orgPoints, offsets):
+    steps = len(offsets)
+
     # configure plot
     fig, ax = plt.subplots()
     ax.set_xlim(0, 1)
@@ -544,17 +613,30 @@ def viewOffsets(pixelEncodings,offsets):
 
     # add slider
     ax_slider = fig.add_axes([0.2, 0.0, 0.65, 0.03])
-    eInit = 0.5
-    slider = Slider(ax=ax_slider, label="x", valmin=0, valmax=1, valinit=eInit)
+    eInit = 0
+    slider = Slider(
+        ax=ax_slider, label="x", valmin=0, valmax=steps, valinit=eInit, valfmt="%d"
+    )
 
-    # TODO need to collapse pixelEncodings outer dimention first
-    origionalPoints = [pixe.toPoint() for pixe in pixelEncodings]
-    
+    bakedOffsets = [orgPoints]
+    for i, offset in enumerate(offsets):
+        bakedOffsets.append(
+            np.array(bakedOffsets[i]) + np.array(offset).reshape((90000, 2))
+        )
+
     def update(t):
+        t = int(t)
+        print(t)
+        print("len of baked offsets = ", bakedOffsets[t].shape)
         ax.clear()
-        for row in offsets:
-            for offset in row:
-                
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_aspect(1)
+
+        # # TODO do this
+        bakedOffset = bakedOffsets[t]
+        print(bakedOffset[:, 1])
+        ax.scatter(bakedOffset[:, 0], bakedOffset[:, 1], c="red", zorder=10, s=0.1)
 
     update(eInit)
     slider.on_changed(update)
@@ -574,29 +656,35 @@ generatedJSONDir = Path(
 # img = ImageOps.grayscale(img)
 
 
-segments = JSONDecode(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
-)
+# segments = JSONDecode(
+#     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
+# )
 
 
-segmentsBaked0 = generateSketch(segments, t=0, seed=1)
-segmentsBaked1 = generateSketch(segments, t=1, seed=1)
+# segmentsBaked0 = generateSketch(segments, t=0, seed=1)
+# segmentsBaked1 = generateSketch(segments, t=1, seed=1)
 
 
-segmentsBaked1Img = renderStrokesCario(segments=segmentsBaked1, size=300)
-pixelEncodings = getPixelEncodings(segmentsBaked1Img, segments)
+# segmentsBaked0Img = renderStrokesCario(segments=segmentsBaked0, size=300)
+# pixelEncodings = getPixelEncodings(segmentsBaked0Img, segments)
 
-print(generateOffsets(pixelEncodings, segmentsBaked0, segmentsBaked1))
 
-# interactivePreview(segments, randColors=True)
+# encodedImage = imgFromPixelEncoding(segmentsBaked0, pixelEncodings)
+# encodedImage.show()
 
-# renderedStrokesImg.show()
-
-# encodedImage = imgFromPixelEncoding(segments, pixelEncoding, renderedStrokesImg.size)
-
+# encodedImage = imgFromPixelEncoding(segmentsBaked1, pixelEncodings)
+# encodedImage.show()
 
 # displayOverlayImages(renderedStrokesImg, encodedImage)
 
 # JSONEncode(generatedJSONDir / "gear.json", strokes)
 
 # segmentsOnImage(img, segments).show()
+
+steps = 10
+orgPoints, offsets = generateSteppedOffsets(
+    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
+    steps=steps,
+)
+
+viewOffsets(orgPoints, offsets)
