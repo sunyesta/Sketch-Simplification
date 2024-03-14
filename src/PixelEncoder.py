@@ -101,7 +101,7 @@ class Segments:
             json.dump(self.toMatrix(), file)
 
     @staticmethod
-    def load(infile):
+    def load(infile, fromBlender=False):
         """loads segment data from a json file (Note: use self.export() to save segment data)
 
         Args:
@@ -110,8 +110,15 @@ class Segments:
         Returns:
             (Segments): an instance of Segments
         """
-        file = open(infile, "r")
-        return Segments(json.load(file))
+
+        points_mat = json.load(open(infile, "r"))
+
+        if fromBlender:
+            points_mat = [
+                [[point[0], 1 - point[1]] for point in seg] for seg in points_mat
+            ]
+
+        return Segments(points_mat)
 
 
 class PixelEncoding:
@@ -165,7 +172,7 @@ class PixelEncodingSet:
 
         return self.items.reshape(self.imgShape)
 
-    def getPoints(self, segments):
+    def get_points(self, segments):
         """applies pixelEncoding.getPoint() to each point in the pixeSet
 
         Args:
@@ -174,12 +181,11 @@ class PixelEncodingSet:
         Returns:
             (np array of points): np array of points from the pixeSet
         """
-        points = np.zeros((self.shape[0] * self.shape[1], 2))
+        points = np.zeros((self.size * self.size, 2))
 
         for i, pixe in enumerate(self.items):
             if pixe:
                 point = pixe.toPoint(segments)
-                # print(point)
                 points[i][0] = point[0]
                 points[i][1] = point[1]
         return points
@@ -187,6 +193,40 @@ class PixelEncodingSet:
     def __getitem__(self, index):
         x, y = index
         return self.items[y * self.size + x]
+
+    def __setitem__(self, index, value):
+        x, y = index
+        self.items[y * self.size + x] = value
+
+    def export(self, outfile=None):
+        """exports the pixeSet data
+
+        Args:
+            outfile (File, optional): output file
+
+        Returns:
+            (list): pixe data ready for export
+        """
+        # print(self.items)
+        exportData = []
+        exportData.append(self.size)
+        exportData.append(
+            [
+                [int(item.pt1_index), float(item.lerp), float(item.delta)]
+                for item in self.items
+                if item
+            ]
+        )
+
+        if outfile:
+            json.dump(exportData, outfile)
+
+        return exportData
+
+    def show(self, segs):
+        points = self.get_points(segs)
+        plt.scatter(points[:, 0], points[:, 1])
+        plt.show()
 
 
 # Other
@@ -200,7 +240,7 @@ def pointToPixel(point_xy, imgsize):
     return point_xy * imgsize
 
 
-def generateSketchSegs(segments, t, seed):
+def generateSketchSegs(segments, t, seed=1):
     """
     Generates sketch segments based on a set of input segments.
 
@@ -287,19 +327,26 @@ def generateSketchSegs(segments, t, seed):
 # --- Encodings --- #
 
 
-def getPixelEncodings(segs, size):
+def generatePixelEncodings(segs, img):
     """generate a PixelEncodingSet from an image and it's corresponding Segments instance
 
     Args:
         segments (Segments): segments that make up the image
-        size (int): width and height of image
+        img (PIL image): image to use as reference when doing the pixel encoding
 
     Returns:
         (PixelEncodingSet): a set of pixel encodings
     """
 
     # create the image
-    img = renderSegsCario(segs, size).convert("1")
+
+    # get the image size
+    assert img.size[0] == img.size[1], "image must be square"
+    size = img.size[0]
+    print("SIZE =", size)
+
+    # get the image pixel data
+    img = img.convert("1")
     pixels = img.load()
 
     # generate a spacial representation of the points
@@ -342,11 +389,10 @@ def getPixelEncodings(segs, size):
             # if pixel value is white, don't encode it
             v = pixels[x, y]
             if v == 255:
-                print("skipped")
                 continue
-
+            print("didn't skip!")
             # find the pixel's corresponding points
-            point = pixelToPoint((x, y), size)
+            point = pixelToPoint(np.array([x, y]), size)
             closest = findClosestPair(point)
             if closest == None:
                 print("Error closest point not found")
@@ -402,7 +448,7 @@ def imgFromPixelEncoding(segs, pixelEncodingSet):
     return img
 
 
-# UNUSED
+# FOR DEBUGGING
 def displayOverlayImages(img1, img2, alpha=0.3):
     # both images must be Mode = "1"
 
@@ -420,7 +466,7 @@ def displayOverlayImages(img1, img2, alpha=0.3):
 # ----- rendering images -----
 
 
-def interactivePreview(segments, showPoints=False, randColors=False, seed=10):
+def interactiveSegsPreview(segments, showPoints=False, randColors=False, seed=10):
 
     def plotStrokes(ax, segments, t, seed, showPoints=False, randColors=False):
 
@@ -473,6 +519,42 @@ def interactivePreview(segments, showPoints=False, randColors=False, seed=10):
     def update(t):
         ax.clear()
         plotStrokes(ax, segments, t, seed, showPoints=showPoints, randColors=randColors)
+
+    update(eInit)
+    slider.on_changed(update)
+
+    plt.show()
+
+
+def interactivePixePreview(
+    segs, img_size=300, showPoints=False, randColors=False, seed=10
+):
+
+    BRUSH_SIZE = 2
+    FIGSIZE = 5
+
+    # configure plot
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect(1)
+
+    # add slider
+    ax_slider = fig.add_axes([0.2, 0.0, 0.65, 0.03])
+    eInit = 0.5
+    slider = Slider(ax=ax_slider, label="x", valmin=0, valmax=1, valinit=eInit)
+
+    # get pixe data
+
+    img = renderSegsCario(segs, img_size)
+    pixe_set = generatePixelEncodings(segs, img)
+
+    # get timestep data
+
+    def update(t):
+        ax.clear()
+        points = pixe_set.get_points(segs)
+        ax.scatter(points[:, 0], points[:, 1], c="red", zorder=10, s=3)
 
     update(eInit)
     slider.on_changed(update)
@@ -533,7 +615,7 @@ def generateOffsets(pixeSet, segs1, segs2):
     return offsets
 
 
-def generateSteppedOffsets(jsonPath, size=300, steps=10, seed=1):
+def generateSteppedOffsets(segs, size=300, steps=10, seed=1):
     """generates a list of stepped offsets given a segMatrix
 
     Args:
@@ -546,7 +628,6 @@ def generateSteppedOffsets(jsonPath, size=300, steps=10, seed=1):
         _type_: _description_
     """
     # get the segments from the json file
-    segs = Segments.load(jsonPath)
 
     # turn the segments into a non-sketchy sketch, timestep = 0
     segsBaked0 = generateSketchSegs(segs, t=0, seed=seed)
@@ -555,7 +636,7 @@ def generateSteppedOffsets(jsonPath, size=300, steps=10, seed=1):
     orgImg = renderSegsCario(segments=segsBaked0, size=size)
 
     # generate the pixel encodings from the clean image and the original segments
-    pixelEncodings = getPixelEncodings(orgImg, segsBaked0)
+    pixelEncodings = generatePixelEncodings(orgImg, segsBaked0)
 
     segsBakedLast = segsBaked0
     steppedOffsets = []
@@ -646,101 +727,54 @@ def viewOffsets(orgPoints, offsets):
     plt.show()
 
 
-def exportOffsetData(outDir, orgPoints, offsets):
-    # only works with square image data
-    # print("shape = ", offsets[0].shape)
-    # assert len(offsets[0].shape[1] == )
-    width, height = offsets[0].shape[0], offsets[0].shape[1]
+def exportData(infile, outdir, img_size):
+    """exports model ready data from an image point matrix
 
-    if not os.path.exists(outDir):
-        os.makedirs(outDir)
+    Args:
+        infile (Path): json file with image point matrix
+        outdir (Path): dir to output the image data
+        img_size (int): output image will be size (img_size,img_size)
+    """
+    segs = None
+    with open(infile, "r") as file:
+        segs = Segments(json.load(file))
+
+    segsBaked = generateSketchSegs(segs, t=0)
+
+    img = renderSegsCario(segsBaked, img_size)
+
+    pixe_set = generatePixelEncodings(segsBaked, img)
+
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+
+    with open(outdir / Path("pixe_set.json"), "wt") as file:
+        pixe_set.export(file)
 
     # points to 1 if pixel is black and 0 if pixel is white
-    with open(outDir / Path("base.json"), "wt") as file:
-        pixels = [255 if point[0] == 0 and point[1] == 0 else 0 for point in orgPoints]
-        pixels = np.array(pixels, dtype="uint8").reshape(height, width)
-
-        # json.dump(pixels.tolist(), file)
-        img = Image.fromarray(pixels, mode="L")
-        # img.show()
-        img.save(outDir / Path("base.png"))
-
-    offsetsDir = outDir / Path("offsets")
-    for i, offset in enumerate(offsets):
-        # print("offset = ", offset)
-        fileDir = offsetsDir / Path(f"offset_{i}.json")
-
-        os.makedirs(os.path.dirname(fileDir), exist_ok=True)
-        with open(fileDir, "wt") as outfile:
-            json.dump(offset.tolist(), outfile)
+    img.save(outdir / Path("base.png"))
 
 
-generatedJSONDir = Path(
-    "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/codeGeneratedJSON"
+# ----- Main Code -----
+
+points_json_path = Path(
+    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json"
 )
 
-# JSONEncode(generatedJSONDir / "monkey.json", segments)
 
-# img = Image.open(
-#     "/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedRenders/monkey.png"
-# )
-# img = ImageOps.grayscale(img)
+out_dir = Path(
+    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset"
+) / Path("monkey")
 
+# exportData(points_json_path, out_dir, 300)
 
-# segments = JSONDecode(
-#     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json",
-# )
-
-
-# segmentsBaked0 = generateSketchSegs(segments, t=0, seed=1)
-# segmentsBaked1 = generateSketchSegs(segments, t=1, seed=1)
-
-
-# segmentsBaked0Img = renderSegsCario(segments=segmentsBaked0, size=300)
-# pixelEncodings = getPixelEncodings(segmentsBaked0Img, segments)
+segs = Segments.load(points_json_path, fromBlender=True)
+img = renderSegsCario(segs, 300)
+pixe_set = generatePixelEncodings(segs, img)
+# img.show()
+pixe_set.show(segs)
+# segsBaked1 = generateSketchSegs(segs, 0, 1)
+# segsBaked2 = generateSketchSegs(segs, 1, 1)
 
 
-# encodedImage = imgFromPixelEncoding(segmentsBaked0, pixelEncodings)
-# encodedImage.show()
-
-# encodedImage = imgFromPixelEncoding(segmentsBaked1, pixelEncodings)
-# encodedImage.show()
-
-# displayOverlayImages(renderedStrokesImg, encodedImage)
-
-# JSONEncode(generatedJSONDir / "gear.json", strokes)
-
-# segmentsOnImage(img, segments).show()
-
-
-# MAIN CODE
-
-# steps = 10
-# orgPoints, offsets = generateSteppedOffsets(
-#     f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/gear.json",
-#     steps=steps,
-#     size=1000,
-# )
-
-
-# viewOffsets(orgPoints, offsets)
-# exportOffsetData(
-#     Path(
-#         f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/gear"
-#     ),
-#     orgPoints,
-#     offsets,
-# )
-
-
-# Main Code 2
-
-# generate data that is needed to generate sketch data for each timestep
-# get the segments from the json file
-segs = Segments.load(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/gear.json"
-)
-getPixelEncodings(segs, 100)
-# export that data
-
-# segsBaked = generateSketchSegs(segs, t=0.5, seed=1)
+# interactivePixePreview(segs)
