@@ -812,12 +812,12 @@ out_dir = Path(
 exportData(points_json_path, out_dir, 64)
 
 # segs = Segments.load(points_json_path, fromBlender=True)
-# segs = Segments.load(
-#     Path(
-#         f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
-#     ),
-#     fromBlender=False,
-# )
+segs = Segments.load(
+    Path(
+        f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
+    ),
+    fromBlender=False,
+)
 # img = renderSegsCario(segs, 1000)
 # pixe_set = generatePixelEncodings(segs, img)
 
@@ -831,7 +831,7 @@ exportData(points_json_path, out_dir, 64)
 # segsBaked2 = generateSketchSegs(segs, 1, 1)
 
 
-interactivePixePreview(segs, 10, img_size=500)
+interactivePixePreview(segs, 10, img_size=64)
 
 # pixe_set.img(segs).show()
 
