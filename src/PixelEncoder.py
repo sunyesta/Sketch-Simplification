@@ -676,7 +676,7 @@ def generateSteppedOffsets(segs, size=300, steps=10, seed=1):
     orgImg = renderSegsCario(segments=segsBaked0, size=size)
 
     # generate the pixel encodings from the clean image and the original segments
-    pixelEncodings = generatePixelEncodings(orgImg, segsBaked0)
+    pixelEncodings = generatePixelEncodings(segsBaked0, orgImg)
 
     segsBakedLast = segsBaked0
     steppedOffsets = []
@@ -688,7 +688,7 @@ def generateSteppedOffsets(segs, size=300, steps=10, seed=1):
         segsBakedLast = segsBakedStep
 
     print("points shape = ", segsBaked0.points.shape)
-    return pixelEncodings.getPoints(segsBaked0), steppedOffsets
+    return pixelEncodings.get_points(segsBaked0), steppedOffsets
 
 
 def bakeOffsets(orgPoints, offsets_set):
@@ -809,15 +809,15 @@ out_dir = Path(
 ) / Path("monkey")
 
 
-# exportData(points_json_path, out_dir, 300)
+exportData(points_json_path, out_dir, 64)
 
 # segs = Segments.load(points_json_path, fromBlender=True)
-segs = Segments.load(
-    Path(
-        f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
-    ),
-    fromBlender=False,
-)
+# segs = Segments.load(
+#     Path(
+#         f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
+#     ),
+#     fromBlender=False,
+# )
 # img = renderSegsCario(segs, 1000)
 # pixe_set = generatePixelEncodings(segs, img)
 
@@ -827,7 +827,7 @@ segs = Segments.load(
 # pixe_set = PixelEncodingSet.load("./test.json")
 # img.show()
 # pixe_set.img(segs).show()
-segsBaked1 = generateSketchSegs(segs, 0, 1)
+# segsBaked1 = generateSketchSegs(segs, 0, 1)
 # segsBaked2 = generateSketchSegs(segs, 1, 1)
 
 
