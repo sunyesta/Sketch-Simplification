@@ -655,7 +655,7 @@ def generateOffsets(pixeSet, segs1, segs2):
     return offsets
 
 
-def generateSteppedOffsets(segs, size=300, steps=10, seed=1):
+def generateSteppedOffsets(segs, size=300, steps=10, stopStep=9, seed=1):
     """generates a list of stepped offsets given a segMatrix
 
     Args:
@@ -680,7 +680,7 @@ def generateSteppedOffsets(segs, size=300, steps=10, seed=1):
 
     segsBakedLast = segsBaked0
     steppedOffsets = []
-    for step in range(0, steps):
+    for step in range(0, stopStep + 1):
         segsBakedStep = generateSketchSegs(segs, t=step / steps, seed=seed)
         steppedOffsets.append(
             generateOffsets(pixelEncodings, segsBakedLast, segsBakedStep)
@@ -831,7 +831,7 @@ exportData(points_json_path, out_dir, 64)
 # segsBaked2 = generateSketchSegs(segs, 1, 1)
 
 
-# interactivePixePreview(segs, 10, img_size=500)
+interactivePixePreview(segs, 10, img_size=500)
 
 # pixe_set.img(segs).show()
 
