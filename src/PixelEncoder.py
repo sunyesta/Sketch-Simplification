@@ -256,10 +256,16 @@ class PixelEncodingSet:
 
 
 def pixelToPoint(pixel_xy, imgsize):
+    assert isinstance(pixel_xy, (int, float)) or isinstance(
+        pixel_xy, np.ndarray
+    ), f"pixel_xy must be either a number or np array. right now it's a {type(pixel_xy)}"
     return pixel_xy / imgsize
 
 
 def pointToPixel(point_xy, imgsize):
+    assert isinstance(point_xy, (int, float)) or isinstance(
+        point_xy, np.ndarray
+    ), f"point_xy must be either a number or np array. right now it's a {type(point_xy)}"
     return np.round(point_xy * imgsize).astype(int)
 
 
@@ -809,15 +815,15 @@ out_dir = Path(
 ) / Path("monkey")
 
 
-exportData(points_json_path, out_dir, 64)
+exportData(points_json_path, out_dir, 200)
 
-# segs = Segments.load(points_json_path, fromBlender=True)
-segs = Segments.load(
-    Path(
-        f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
-    ),
-    fromBlender=False,
-)
+# # segs = Segments.load(points_json_path, fromBlender=True)
+# segs = Segments.load(
+#     Path(
+#         f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset/monkey/segs.json"
+#     ),
+#     fromBlender=False,
+# )
 # img = renderSegsCario(segs, 1000)
 # pixe_set = generatePixelEncodings(segs, img)
 
@@ -831,8 +837,14 @@ segs = Segments.load(
 # segsBaked2 = generateSketchSegs(segs, 1, 1)
 
 
-interactivePixePreview(segs, 10, img_size=64)
+# interactivePixePreview(segs, 10, img_size=64)
 
 # pixe_set.img(segs).show()
 
 # interactiveSegsPreview(segs)
+
+
+# IMG_SIZE = 64
+# points = np.array([0.3, 0.4, 0.3, 0.2])
+# print(points)
+# print(pointToPixel(points, IMG_SIZE))
