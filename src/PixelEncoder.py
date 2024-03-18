@@ -805,14 +805,16 @@ def exportData(infile, outdir, img_size):
 
 print("testing2")
 
+itemName = "monkey"
+
 points_json_path = Path(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/disposable/blenderGeneratedJSON/monkey.json"
+    f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/disposable/blenderGeneratedJSON/{itemName}.json"
 )
 
 
 out_dir = Path(
-    f"/Users/mary/Documents/School/Sketch Simplification/Sketch-Simplification/dataset"
-) / Path("monkey")
+    f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/dataset"
+) / Path(itemName)
 
 
 exportData(points_json_path, out_dir, 200)
