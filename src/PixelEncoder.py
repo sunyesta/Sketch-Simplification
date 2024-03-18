@@ -115,6 +115,8 @@ class Segments:
         points_mat = json.load(open(infile, "r"))
 
         if fromBlender:
+
+            points_mat = [seg for seg in points_mat if len(seg) >= 3]
             points_mat = [
                 [[point[0], 1 - point[1]] for point in seg] for seg in points_mat
             ]
@@ -424,6 +426,7 @@ def generatePixelEncodings(segs, img):
             closest = findClosestPair(point)
             if closest == None:
                 print("Error closest point not found")
+                continue
 
             # get point and line info
             point = Point(point)
@@ -798,26 +801,26 @@ def exportData(infile, outdir, img_size):
     # points to 1 if pixel is black and 0 if pixel is white
     img.save(outdir / Path("base.png"))
 
-    segs.export(out_dir / Path("segs.json"))
+    segs.export(outdir / Path("segs.json"))
 
 
 # ----- Main Code -----
 
-print("testing2")
+# print("testing2")
 
-itemName = "monkey"
+# itemName = "monkey"
 
-points_json_path = Path(
-    f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/disposable/blenderGeneratedJSON/{itemName}.json"
-)
-
-
-out_dir = Path(
-    f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/dataset"
-) / Path(itemName)
+# points_json_path = Path(
+#     f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/disposable/blenderGeneratedJSON/{itemName}.json"
+# )
 
 
-exportData(points_json_path, out_dir, 200)
+# out_dir = Path(
+#     f"/Users/mary/Documents/School/Sketch Simplification/sketch_simplification_2/dataset"
+# ) / Path(itemName)
+
+
+# exportData(points_json_path, out_dir, 200)
 
 # # segs = Segments.load(points_json_path, fromBlender=True)
 # segs = Segments.load(

@@ -1,2 +1,4 @@
 *.blend
 disposable/
+dataset/
+model/
